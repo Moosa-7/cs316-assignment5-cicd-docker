@@ -75,21 +75,14 @@ jobs:
 
       - name: Copy compose file to Testing EC2
         run: |
-          scp -i ~/.ssh/testing_key -o StrictHostKeyChecking=no \
-            docker-compose.prod.yml \
-            ${{ secrets.EC2_USER }}@${{ secrets.TESTING_HOST }}:/home/ubuntu/
+          scp -i ~/.ssh/testing_key -o StrictHostKeyChecking=no docker-compose.prod.yml ${{ secrets.EC2_USER }}@${{ secrets.TESTING_HOST }}:/home/ubuntu/
 
       - name: Deploy on Testing EC2
+        env:
+          REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          REGION: ${{ secrets.AWS_REGION }}
         run: |
-          ssh -i ~/.ssh/testing_key -o StrictHostKeyChecking=no \
-            ${{ secrets.EC2_USER }}@${{ secrets.TESTING_HOST }} \
-            "cd /home/ubuntu && \
-             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
-             export REGISTRY=${{ secrets.ECR_REGISTRY }} && \
-             export TAG=testing-latest && \
-             sudo -E docker compose -f docker-compose.prod.yml pull && \
-             sudo -E docker compose -f docker-compose.prod.yml down && \
-             sudo -E docker compose -f docker-compose.prod.yml up -d"
+          ssh -i ~/.ssh/testing_key -o StrictHostKeyChecking=no ${{ secrets.EC2_USER }}@${{ secrets.TESTING_HOST }} "set -e; cd /home/ubuntu; sudo aws ecr get-login-password --region ${REGION} | sudo docker login --username AWS --password-stdin ${REGISTRY}; sudo docker pull ${REGISTRY}/myapp-backend:testing-latest; sudo docker pull ${REGISTRY}/myapp-frontend:testing-latest; sudo docker pull mysql:8; sudo REGISTRY=${REGISTRY} TAG=testing-latest docker compose -f docker-compose.prod.yml down; sudo REGISTRY=${REGISTRY} TAG=testing-latest docker compose -f docker-compose.prod.yml up -d; sleep 5; sudo docker ps"
 
       - name: Send success email
         if: success()
@@ -106,7 +99,6 @@ jobs:
           body: |
             Deployment to Testing succeeded.
             Access at: http://${{ secrets.TESTING_HOST }}
-            PR: ${{ github.event.pull_request.html_url }}
 
       - name: Send failure email
         if: failure()
@@ -122,4 +114,4 @@ jobs:
           from: GitHub Actions
           body: |
             Testing deployment failed.
-            See: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
