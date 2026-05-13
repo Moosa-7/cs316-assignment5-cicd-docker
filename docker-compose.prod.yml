@@ -1,0 +1,56 @@
+services:
+  database:
+    image: mysql:8
+    container_name: app-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass123
+      MYSQL_DATABASE: myappdb
+      MYSQL_USER: appuser
+      MYSQL_PASSWORD: apppass123
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - app-network
+
+  backend:
+    image: ${REGISTRY}/myapp-backend:${TAG}
+    container_name: app-backend
+    restart: always
+    ports:
+      - "5001:5000"
+    environment:
+      - DB_HOST=database
+      - DB_PORT=3306
+      - DB_USER=appuser
+      - DB_PASS=apppass123
+      - DB_NAME=myappdb
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  frontend:
+    image: ${REGISTRY}/myapp-frontend:${TAG}
+    container_name: app-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+volumes:
+  db-data:
+
+networks:
+  app-network:
+    driver: bridge
