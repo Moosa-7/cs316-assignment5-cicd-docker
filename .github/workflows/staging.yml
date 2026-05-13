@@ -66,29 +66,30 @@ jobs:
           docker build -t $REGISTRY/myapp-frontend:staging-latest ./frontend
           docker push $REGISTRY/myapp-frontend:staging-latest
 
-      - name: Copy compose to Staging EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          source: "docker-compose.prod.yml"
-          target: "/home/ubuntu/"
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/staging_key
+          chmod 600 ~/.ssh/staging_key
+          ssh-keyscan -H ${{ secrets.STAGING_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy compose file to Staging EC2
+        run: |
+          scp -i ~/.ssh/staging_key -o StrictHostKeyChecking=no \
+            docker-compose.prod.yml \
+            ${{ secrets.EC2_USER }}@${{ secrets.STAGING_HOST }}:/home/ubuntu/
 
       - name: Deploy on Staging EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu
-            aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }}
-            export REGISTRY=${{ secrets.ECR_REGISTRY }}
-            export TAG=staging-latest
-            sudo -E docker compose -f docker-compose.prod.yml pull
-            sudo -E docker compose -f docker-compose.prod.yml down
-            sudo -E docker compose -f docker-compose.prod.yml up -d
+        run: |
+          ssh -i ~/.ssh/staging_key -o StrictHostKeyChecking=no \
+            ${{ secrets.EC2_USER }}@${{ secrets.STAGING_HOST }} \
+            "cd /home/ubuntu && \
+             aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | sudo docker login --username AWS --password-stdin ${{ secrets.ECR_REGISTRY }} && \
+             export REGISTRY=${{ secrets.ECR_REGISTRY }} && \
+             export TAG=staging-latest && \
+             sudo -E docker compose -f docker-compose.prod.yml pull && \
+             sudo -E docker compose -f docker-compose.prod.yml down && \
+             sudo -E docker compose -f docker-compose.prod.yml up -d"
 
       - name: Send success email
         if: success()
@@ -99,7 +100,7 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "✅ Staging Deployment Succeeded - ${{ github.sha }}"
+          subject: "Staging Deployment Succeeded"
           to: ${{ secrets.INSTRUCTOR_EMAIL }}
           from: GitHub Actions
           body: |
@@ -117,10 +118,10 @@ jobs:
           secure: true
           username: ${{ secrets.EMAIL_USERNAME }}
           password: ${{ secrets.EMAIL_PASSWORD }}
-          subject: "❌ Staging Workflow Failed"
+          subject: "Staging Workflow Failed"
           to: ${{ secrets.INSTRUCTOR_EMAIL }}
           from: GitHub Actions
           body: |
-            The staging workflow failed.
+            Staging workflow failed.
             Commit: ${{ github.sha }}
             Logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
