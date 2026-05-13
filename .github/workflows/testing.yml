@@ -23,11 +23,32 @@ jobs:
           cd backend
           npm install
 
-      - name: Run Unit Tests
+      - name: Run API Tests
         run: |
-          cd backend
-          npm test
-
+          # Wait for server to be ready
+          sleep 10
+      
+          # Test 1: Health check - GET /api/todos should return 200
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ secrets.TESTING_HOST }}/api/todos)
+          if [ "$STATUS" != "200" ]; then
+            echo "❌ GET /api/todos failed with status $STATUS"
+            exit 1
+          fi
+          echo "✅ GET /api/todos passed"
+      
+          # Test 2: POST /api/todos should create a todo
+          RESPONSE=$(curl -s -X POST http://${{ secrets.TESTING_HOST }}/api/todos \
+            -H "Content-Type: application/json" \
+            -d '{"title":"CI Test Todo"}')
+          echo "$RESPONSE" | grep -q "CI Test Todo"
+          if [ $? -ne 0 ]; then
+            echo "❌ POST /api/todos failed"
+            exit 1
+          fi
+          echo "✅ POST /api/todos passed"
+      
+          echo "All tests passed ✅"
+          
       - name: Run ESLint
         run: |
           cd backend
