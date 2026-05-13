@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   database:
     image: mysql:8
@@ -15,6 +13,12 @@ services:
     volumes:
       - db-data:/var/lib/mysql
       - ./backend/db-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass123"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
     networks:
       - app-network
 
@@ -23,7 +27,7 @@ services:
     container_name: app-backend
     restart: always
     ports:
-      - "5000:5000"
+      - "5001:5000"
     environment:
       - DB_HOST=database
       - DB_PORT=3306
@@ -31,7 +35,8 @@ services:
       - DB_PASS=apppass123
       - DB_NAME=myappdb
     depends_on:
-      - database
+      database:
+        condition: service_healthy
     networks:
       - app-network
 
