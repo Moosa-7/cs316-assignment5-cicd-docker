@@ -1,0 +1,109 @@
+name: Deploy to Testing Environment
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:   # Manual trigger button
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install backend dependencies
+        run: |
+          cd backend
+          npm install
+
+      - name: Run Unit Tests
+        run: |
+          cd backend
+          npm test
+
+      - name: Run ESLint
+        run: |
+          cd backend
+          npm run lint
+
+      - name: Build React Frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Deploy to Testing Server
+        if: success()
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.TESTING_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /var/www/todo-app || git clone https://github.com/${{ github.repository }} /var/www/todo-app
+            cd /var/www/todo-app
+            git fetch origin
+            git checkout ${{ github.head_ref }}
+            git pull origin ${{ github.head_ref }}
+
+            # Backend
+            cd backend
+            npm install
+            cat > .env << EOF
+            DB_HOST=${{ secrets.DB_HOST }}
+            DB_USER=${{ secrets.DB_USER }}
+            DB_PASS=${{ secrets.DB_PASS }}
+            DB_NAME=${{ secrets.DB_NAME }}
+            PORT=5000
+            EOF
+            pm2 restart todo-backend || pm2 start server.js --name todo-backend
+
+            # Frontend
+            cd ../frontend
+            npm install
+            npm run build
+            sudo cp -r build/* /var/www/todo-frontend/
+
+      - name: Send Success Email to QA
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "✅ Deployment Successful - PR #${{ github.event.pull_request.number }}"
+          to: ${{ secrets.INSTRUCTOR_EMAIL }}
+          from: ${{ secrets.MAIL_USERNAME }}
+          body: |
+            The PR "${{ github.event.pull_request.title }}" has been successfully deployed to the Testing environment.
+
+            Access the app at: http://${{ secrets.TESTING_HOST }}
+
+            PR by: ${{ github.event.pull_request.user.login }}
+            Branch: ${{ github.head_ref }}
+
+      - name: Send Failure Email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "❌ Workflow Failed - PR #${{ github.event.pull_request.number }}"
+          to: ${{ secrets.INSTRUCTOR_EMAIL }},${{ github.event.pull_request.user.login }}@gmail.com
+          from: ${{ secrets.MAIL_USERNAME }}
+          body: |
+            The workflow for PR "${{ github.event.pull_request.title }}" has FAILED.
+
+            Repo: ${{ github.repository }}
+            Branch: ${{ github.head_ref }}
+            Check logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
